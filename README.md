@@ -16,6 +16,16 @@ phone / laptop ──► VPS relay ══════ tunnel ══════ 
 Needs a router that can run a WireGuard server and client at the same time. Tested on stock Asuswrt 388
 (ZenWiFi XT8).
 
+## Why not frp, Tailscale or Cloudflare Tunnel?
+
+- **frp** proxies every packet through daemons at both ends; here the kernel forwards them.
+- **Tailscale** needs its app on every device and an account; here any stock WireGuard client works, with no
+  third party involved.
+- **Cloudflare Tunnel** is built for publishing web apps, not carrying a VPN for stock clients.
+
+The trade-off: WireGuard inside WireGuard costs 160 bytes a packet, so throughput tops out around 87% of
+line speed.
+
 ## Quick start
 
 1. **Create a [TierHive](https://tierhive.com/r/2926B31FDA30) VPS** with Alpine Linux, near home, with your

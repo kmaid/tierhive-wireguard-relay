@@ -75,7 +75,7 @@ the script's `{{tokens}}`. The command line wins over recipe values.
 | `--router-port` | `51820` | Your router's WireGuard server port |
 | `--router-public-key` | *generated* | Bring your own router tunnel key |
 
-`sh run.sh --help` lists the rest: CAKE pacing, the fair-use guard, daily updates and SSH hardening.
+`sh run.sh --help` lists the rest: CAKE pacing, daily updates and SSH hardening.
 
 ## How it works
 
@@ -83,8 +83,8 @@ The router keeps a WireGuard tunnel to the VPS (`10.88.0.2` ↔ `10.88.0.1`) ope
 The VPS forwards device packets arriving on `client_port` down that tunnel to the router's WireGuard server,
 and connection tracking sends the replies back. It holds only the tunnel key, never device keys.
 
-TierHive throttles a location once its hourly average reaches 100 Mbit/s. A cron job caps the relay at
-85 Mbit/s before that happens (log: `/var/log/fup.log`). Uncapped, expect about 225 Mbit/s each way.
+This is built for remote access, not sustained bandwidth: TierHive's unmetered traffic isn't unlimited, and it
+caps accounts that run heavy traffic for long periods.
 
 ## Troubleshooting
 

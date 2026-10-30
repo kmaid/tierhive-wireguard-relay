@@ -11,7 +11,7 @@
 
 set -eu
 
-SETTINGS="tunnel_port public_tunnel_port client_port router_port router_public_key egress_rate fair_use_guard
+SETTINGS="tunnel_port public_tunnel_port client_port router_port router_public_key egress_rate
 auto_update harden_ssh"
 
 usage() {
@@ -25,7 +25,6 @@ Settings (command line > TierHive recipe value > default):
   --router-port         the router's WireGuard server port                      (51820)
   --router-public-key   router tunnel public key; generated and printed if empty
   --egress-rate         CAKE pacing rate such as 200mbit, or off                (off)
-  --fair-use-guard      on/off: cap at 85mbit before TierHive's fair-use throttle (on)
   --auto-update         on/off: daily apk upgrades                              (on)
   --harden-ssh          on/off: key-only SSH if root has authorized_keys        (on)
 EOF
@@ -60,7 +59,6 @@ client_port=${cli_client_port:-'{{client_port}}'}
 router_port=${cli_router_port:-'{{router_port}}'}
 router_public_key=${cli_router_public_key:-'{{router_public_key}}'}
 egress_rate=${cli_egress_rate:-'{{egress_rate}}'}
-fair_use_guard=${cli_fair_use_guard:-'{{fair_use_guard}}'}
 auto_update=${cli_auto_update:-'{{auto_update}}'}
 harden_ssh=${cli_harden_ssh:-'{{harden_ssh}}'}
 
@@ -75,11 +73,10 @@ done
 : "${client_port:=51821}"
 : "${router_port:=51820}"
 : "${egress_rate:=off}"
-: "${fair_use_guard:=on}"
 : "${auto_update:=on}"
 : "${harden_ssh:=on}"
 
-for name in fair_use_guard auto_update harden_ssh; do
+for name in auto_update harden_ssh; do
     eval "value=\$$name"
     case "$value" in
         on|ON|On|1|yes|true) eval "$name=on" ;;
@@ -150,7 +147,7 @@ echo '######################################'
 log "Installing packages..."
 apk add -q wireguard-tools iptables iproute2-tc
 
-for module in wireguard nf_conntrack sch_cake ifb act_mirred; do
+for module in wireguard nf_conntrack sch_cake; do
     grep -qx "$module" /etc/modules 2>/dev/null || echo "$module" >> /etc/modules
     modprobe "$module"
 done
@@ -197,99 +194,8 @@ EOF
 else
     rm -f /etc/periodic/daily/apk-upgrade
 fi
-
-# --- Fair-use guard -------------------------------------------------------------
-cron_changed=0
-if [ "$fair_use_guard" = on ]; then
-    install_stdin /usr/local/sbin/fup-governor 755 << 'EOF' || true
-#!/bin/sh
-# Keep the relay under TierHive's fair-use policy (100 Mbit/s hourly average -> stepped throttling).
-# Runs from cron every 5 minutes: samples eth0 counters, computes the rolling 60-minute average
-# per direction, and caps both directions with CAKE while the average is high.
-
-[ -f /etc/conf.d/fup-governor ] && . /etc/conf.d/fup-governor
-
-: "${FUP_IFACE:=eth0}"
-: "${FUP_THROTTLE_AT:=75}"
-: "${FUP_RELEASE_AT:=60}"
-: "${FUP_CAP:=85mbit}"
-: "${FUP_NORMAL:=250mbit}"
-: "${FUP_WINDOW:=3600}"
-STATE_DIR=/run/fup
-SAMPLES="$STATE_DIR/samples"
-LOG=/var/log/fup.log
-
-mkdir -p "$STATE_DIR"
-s=/sys/class/net/$FUP_IFACE/statistics
-now=$(date +%s); rx=$(cat "$s/rx_bytes"); tx=$(cat "$s/tx_bytes")
-
-# Counter reset (reboot / interface recreated) invalidates the window
-last_rx=$(tail -n 1 "$SAMPLES" 2>/dev/null | cut -d' ' -f2)
-[ -n "$last_rx" ] && [ "$rx" -lt "$last_rx" ] && : > "$SAMPLES"
-
-echo "$now $rx $tx" >> "$SAMPLES"
-awk -v cutoff=$((now - FUP_WINDOW - 300)) '$1 >= cutoff' "$SAMPLES" > "$SAMPLES.tmp" && mv "$SAMPLES.tmp" "$SAMPLES"
-
-# Rolling average against the oldest sample (a shorter window overestimates, which is the safe side)
-set -- $(head -n 1 "$SAMPLES")
-span=$((now - $1))
-[ "$span" -lt 240 ] && exit 0
-read -r rx_avg tx_avg << AVG
-$(awk -v r0="$2" -v t0="$3" -v r1="$rx" -v t1="$tx" -v d="$span" 'BEGIN { printf "%.1f %.1f\n", (r1-r0)*8/d/1e6, (t1-t0)*8/d/1e6 }')
-AVG
-
-throttled=0; [ -f "$STATE_DIR/throttled" ] && throttled=1
-
-cap_on() {
-    tc qdisc replace dev "$FUP_IFACE" root cake bandwidth "$FUP_CAP"
-    ip link set ifb0 up
-    tc qdisc replace dev ifb0 root cake bandwidth "$FUP_CAP" ingress
-    tc qdisc replace dev "$FUP_IFACE" handle ffff: ingress
-    tc filter replace dev "$FUP_IFACE" parent ffff: prio 1 matchall action mirred egress redirect dev ifb0
-    touch "$STATE_DIR/throttled"
-}
-
-cap_off() {
-    tc qdisc del dev "$FUP_IFACE" ingress 2>/dev/null
-    tc qdisc del dev ifb0 root 2>/dev/null
-    ip link set ifb0 down 2>/dev/null
-    if [ "$FUP_NORMAL" = off ]; then
-        tc qdisc del dev "$FUP_IFACE" root 2>/dev/null
-    else
-        tc qdisc replace dev "$FUP_IFACE" root cake bandwidth "$FUP_NORMAL"
-    fi
-    rm -f "$STATE_DIR/throttled"
-}
-
-action=""
-if [ "$throttled" -eq 0 ] && awk -v a="$rx_avg" -v b="$tx_avg" -v t="$FUP_THROTTLE_AT" 'BEGIN { exit !(a >= t || b >= t) }'; then
-    cap_on; action=" -> CAPPED at $FUP_CAP"
-elif [ "$throttled" -eq 1 ] && awk -v a="$rx_avg" -v b="$tx_avg" -v t="$FUP_RELEASE_AT" 'BEGIN { exit !(a < t && b < t) }'; then
-    cap_off; action=" -> released"
-elif [ "$throttled" -eq 1 ]; then
-    cap_on    # re-assert: a wg0 restart resets the egress qdisc
-fi
-
-state=normal; [ -f "$STATE_DIR/throttled" ] && state=capped
-echo "$(date '+%Y-%m-%d %H:%M') in ${rx_avg} out ${tx_avg} Mbit/s (${span}s window) $state$action" >> "$LOG"
-tail -n 2000 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
-EOF
-    echo "FUP_NORMAL=$egress_rate" | install_stdin /etc/conf.d/fup-governor 644 || true
-    if ! grep -q fup-governor /etc/crontabs/root; then
-        printf '*/5\t*\t*\t*\t*\t/usr/local/sbin/fup-governor\n' >> /etc/crontabs/root
-        cron_changed=1
-    fi
-elif grep -q fup-governor /etc/crontabs/root; then
-    sed -i '/fup-governor/d' /etc/crontabs/root
-    cron_changed=1
-fi
 rc-update add crond default >/dev/null 2>&1 || true
-# BusyBox crond only rereads crontabs when the directory changes
-if [ "$cron_changed" = 1 ]; then
-    rc-service crond restart || true
-else
-    rc-service crond start >/dev/null 2>&1 || true
-fi
+rc-service crond start >/dev/null 2>&1 || true
 
 # --- Router key ------------------------------------------------------------------
 mkdir -p /etc/wireguard

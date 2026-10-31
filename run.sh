@@ -268,7 +268,7 @@ echo
     else
         echo "PrivateKey = <your router's tunnel private key>"
     fi
-    echo "Address = $ROUTER_ADDRESS/32"
+    echo "Address = $ROUTER_ADDRESS/24"
     echo "MTU = 1420"
     echo
     echo "[Peer]"
@@ -281,7 +281,7 @@ chmod 600 "$router_conf"
 echo "In your VPS's port forwarding, forward UDP $tunnel_port (router tunnel) and $client_port (devices)"
 echo "and note the public ports you get back."
 echo
-echo "Import this on your router as a WireGuard *client* (saved to $router_conf)."
+echo "Import this on your router as a WireGuard *client* (saved to $router_conf), keeping the /24 Address."
 echo "Route no devices through it; it only lets the relay reach the router:"
 echo
 cat "$router_conf"

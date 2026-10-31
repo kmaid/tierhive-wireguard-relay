@@ -52,9 +52,11 @@ Re-run the script any time to change settings or upgrade.
    `ssh -p <ssh port> root@<VPS IP> cat /root/router-tunnel.conf > router-tunnel.conf`
 2. **WireGuard server**: *VPN → VPN Server → WireGuard VPN*. Enable it on port `51820` and add a client
    for each device.
-3. **WireGuard client**: open `http://router.asus.com/Advanced_WireguardClient_Content.asp`, pick an unused
-   unit and enable it. Upload `router-tunnel.conf` (fill in its Endpoint port first), or enter its values with
-   **NAT: No** and **Allowed IPs: `10.88.0.1/32`** (never `0.0.0.0/0`). Route no devices through it.
+3. **WireGuard client**: in *VPN → VPN Fusion*, add a WireGuard profile and upload `router-tunnel.conf` (fill
+   in its Endpoint port first). Check it has **NAT: No**, **Address: `10.88.0.2/24`** and **Allowed IPs:
+   `10.88.0.1/32`** (never `0.0.0.0/0`). Assign no devices, don't make it the default connection, and turn it
+   on. Use VPN Fusion rather than the hidden client page: a client set up only on that page didn't restart
+   after a reboot.
 4. **Devices**: export each server client profile and, in the WireGuard app, set **Endpoint** to
    `<VPS IP>:<public port for 51821>` (ASUS fills in its own WAN address, which CGNAT makes unreachable)
    and **MTU** to `1340`.
@@ -91,6 +93,8 @@ caps accounts that run heavy traffic for long periods.
 - **No handshake in `wg show wg0`:** check the router client's endpoint uses the *public* tunnel port.
 - **Tunnel up but devices can't connect:** check the client port forward and the device Endpoint.
   `iptables -t nat -L PREROUTING -v -n` shows whether packets arrive.
+- **Handshake works but devices can't connect:** the router's tunnel Address must be `10.88.0.2/24`. With `/32`,
+  VPN Fusion leaves the router with no main-table route back to the relay.
 - **Pages hang, ping works:** the device profile needs an explicit `MTU = 1340`. "Auto" picks 1420, which
   doesn't fit inside the relay's own tunnel (each tunnel adds 80 bytes).
 - **Moving VPS:** run the script on the new one with `--router-public-key`, then update the router's and

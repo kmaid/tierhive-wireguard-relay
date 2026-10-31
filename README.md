@@ -55,8 +55,7 @@ Re-run the script any time to change settings or upgrade.
 3. **WireGuard client**: in *VPN → VPN Fusion*, add a WireGuard profile and upload `router-tunnel.conf` (fill
    in its Endpoint port first). Check it has **NAT: No**, **Address: `10.88.0.2/24`** and **Allowed IPs:
    `10.88.0.1/32`** (never `0.0.0.0/0`). Assign no devices, don't make it the default connection, and turn it
-   on. Use VPN Fusion rather than the hidden client page: a client set up only on that page didn't restart
-   after a reboot.
+   on.
 4. **Devices**: export each server client profile and, in the WireGuard app, set **Endpoint** to
    `<VPS IP>:<public port for 51821>` (ASUS fills in its own WAN address, which CGNAT makes unreachable)
    and **MTU** to `1340`.
